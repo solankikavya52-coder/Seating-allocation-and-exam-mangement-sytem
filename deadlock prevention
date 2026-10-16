@@ -1,161 +1,129 @@
-#include <cstdlib>
-#include <iomanip>
 #include <iostream>
-#include <memory>
+#include <vector>
 #include <string>
+#include <thread>
+#include <mutex>
+#include <algorithm>
+using namespace std;
+mutex roomMutex;
+struct Allocation {
+    int studentId;
+    string studentName;
+    int roomId;
+    int seatNo;
+};
+vector<Allocation> allocations = {
+    {101, "Student A", 1, 1},
+    {102, "Student B", 1, 2},
+    {103, "Student C", 2, 1},
+    {104, "Student D", 2, 2}
+};
 
-#include <mysql_driver.h>
-#include <mysql_connection.h>
-#include <cppconn/driver.h>
-#include <cppconn/connection.h>
-#include <cppconn/prepared_statement.h>
-#include <cppconn/resultset.h>
-#include <cppconn/exception.h>
+// Display all seating allocations
+void displayReport() {
+    lock_guard<mutex> lock(roomMutex);
 
-namespace {
-const char* DB_HOST = "tcp://127.0.0.1:3306";
-const char* DB_NAME = "exam_management";
-const char* DB_USER = "root";
+    cout << "\n===== SEATING ALLOCATION REPORT =====\n";
+    cout << "Student ID\tName\t\tRoom\tSeat\n";
 
-std::string getPassword() {
-    const char* value = std::getenv("DB_PASSWORD");
-    return value ? value : "";
-}
-
-std::unique_ptr<sql::Connection> connectDatabase() {
-    auto* driver = sql::mysql::get_mysql_driver_instance();
-    std::unique_ptr<sql::Connection> connection(
-        driver->connect(DB_HOST, DB_USER, getPassword()));
-    connection->setSchema(DB_NAME);
-    return connection;
-}
-
-int readInteger(const std::string& prompt) {
-    int value;
-    std::cout << prompt;
-    while (!(std::cin >> value)) {
-        std::cin.clear();
-        std::cin.ignore(10000, '\n');
-        std::cout << "Please enter a valid number: ";
-    }
-    return value;
-}
-
-void roomWiseReport(sql::Connection& connection, int examId) {
-    std::unique_ptr<sql::PreparedStatement> query(
-        connection.prepareStatement(
-            "SELECT e.exam_name, e.exam_date, r.room_name, r.capacity, "
-            "COUNT(a.allocation_id) AS occupied "
-            "FROM EXAM e "
-            "JOIN ALLOCATION a ON a.exam_id = e.exam_id "
-            "JOIN ROOM r ON r.room_id = a.room_id "
-            "WHERE e.exam_id = ? "
-            "GROUP BY e.exam_name, e.exam_date, r.room_id, "
-            "r.room_name, r.capacity "
-            "ORDER BY r.room_name"));
-    query->setInt(1, examId);
-    std::unique_ptr<sql::ResultSet> rows(query->executeQuery());
-
-    std::cout << "\nROOM-WISE REPORT\n";
-    std::cout << "------------------------------------------------------------\n";
-    bool found = false;
-    while (rows->next()) {
-        found = true;
-        int capacity = rows->getInt("capacity");
-        int occupied = rows->getInt("occupied");
-        std::cout << "Exam: " << rows->getString("exam_name")
-                  << " | Date: " << rows->getString("exam_date") << '\n'
-                  << "Room: " << rows->getString("room_name")
-                  << " | Capacity: " << capacity
-                  << " | Occupied: " << occupied
-                  << " | Available: " << capacity - occupied << '\n';
-        std::cout << "------------------------------------------------------------\n";
-    }
-    if (!found) {
-        std::cout << "No allocations found for this exam ID.\n";
+    for (const auto& a : allocations) {
+        cout << a.studentId << "\t\t"
+             << a.studentName << "\t"
+             << a.roomId << "\t"
+             << a.seatNo << "\n";
     }
 }
 
-void studentWiseReport(sql::Connection& connection, int examId) {
-    std::unique_ptr<sql::PreparedStatement> query(
-        connection.prepareStatement(
-            "SELECT s.roll_no, s.full_name, e.exam_name, "
-            "r.room_name, a.seat_no "
-            "FROM ALLOCATION a "
-            "JOIN STUDENT s ON s.student_id = a.student_id "
-            "JOIN EXAM e ON e.exam_id = a.exam_id "
-            "JOIN ROOM r ON r.room_id = a.room_id "
-            "WHERE a.exam_id = ? "
-            "ORDER BY s.roll_no"));
-    query->setInt(1, examId);
-    std::unique_ptr<sql::ResultSet> rows(query->executeQuery());
+// Search for a student
+void searchStudent(int id) {
+    lock_guard<mutex> lock(roomMutex);
 
-    std::cout << "\nSTUDENT-WISE REPORT\n";
-    std::cout << std::left << std::setw(16) << "Roll No"
-              << std::setw(26) << "Student"
-              << std::setw(22) << "Exam"
-              << std::setw(16) << "Room" << "Seat\n";
-    std::cout << "------------------------------------------------------------\n";
-    while (rows->next()) {
-        std::cout << std::left << std::setw(16) << rows->getString("roll_no")
-                  << std::setw(26) << rows->getString("full_name")
-                  << std::setw(22) << rows->getString("exam_name")
-                  << std::setw(16) << rows->getString("room_name")
-                  << rows->getInt("seat_no") << '\n';
+    for (const auto& a : allocations) {
+        if (a.studentId == id) {
+            cout << "Student: " << a.studentName
+                 << ", Room: " << a.roomId
+                 << ", Seat: " << a.seatNo << "\n";
+            return;
+        }
     }
+
+    cout << "Student allocation not found.\n";
 }
 
-void showRecentAuditLogs(sql::Connection& connection) {
-    std::unique_ptr<sql::PreparedStatement> query(
-        connection.prepareStatement(
-            "SELECT audit_id, action_type, entity_type, entity_id, "
-            "details, actor, created_at "
-            "FROM AUDIT_LOG ORDER BY audit_id DESC LIMIT 20"));
-    std::unique_ptr<sql::ResultSet> rows(query->executeQuery());
+// Initial emergency reallocation workflow
+void reallocateStudent(int studentId, int newRoom, int newSeat) {
+    lock_guard<mutex> lock(roomMutex);
 
-    std::cout << "\nRECENT AUDIT LOGS\n";
-    std::cout << "------------------------------------------------------------\n";
-    while (rows->next()) {
-        std::cout << "#" << rows->getInt("audit_id")
-                  << " | " << rows->getString("action_type")
-                  << " | " << rows->getString("entity_type")
-                  << " ID=" << rows->getInt("entity_id")
-                  << " | " << rows->getString("actor")
-                  << " | " << rows->getString("created_at")
-                  << "\n  " << rows->getString("details") << '\n';
+    // Check if the destination seat is already occupied
+    for (const auto& a : allocations) {
+        if (a.roomId == newRoom && a.seatNo == newSeat) {
+            cout << "Target seat is already occupied!\n";
+            return;
+        }
     }
+
+    // Find and update the student's allocation
+    for (auto& a : allocations) {
+        if (a.studentId == studentId) {
+            int oldRoom = a.roomId;
+            int oldSeat = a.seatNo;
+
+            a.roomId = newRoom;
+            a.seatNo = newSeat;
+
+            cout << "Reallocation successful.\n";
+            cout << "Previous: Room " << oldRoom
+                 << ", Seat " << oldSeat << "\n";
+            cout << "New: Room " << newRoom
+                 << ", Seat " << newSeat << "\n";
+            return;
+        }
+    }
+
+    cout << "Student allocation not found.\n";
 }
-} // namespace
 
 int main() {
-    try {
-        auto connection = connectDatabase();
-        std::cout << "Connected to exam_management.\n";
+    int choice;
 
-        while (true) {
-            std::cout << "\n=== REPORTS & REALLOCATION (PHASE 2 - 40%) ===\n"
-                      << "1. Room-wise seating report\n"
-                      << "2. Student-wise allocation report\n"
-                      << "3. View recent audit logs\n"
-                      << "0. Exit\n";
-            int choice = readInteger("Choose option: ");
+    do {
+        cout << "\n===== REPORTS & REALLOCATION =====\n";
+        cout << "1. Display Seating Report\n";
+        cout << "2. Search Student\n";
+        cout << "3. Emergency Reallocation\n";
+        cout << "0. Exit\n";
+        cout << "Enter choice: ";
+        cin >> choice;
 
-            if (choice == 0) break;
-            if (choice == 1) {
-                roomWiseReport(*connection, readInteger("Enter exam ID: "));
-            } else if (choice == 2) {
-                studentWiseReport(*connection, readInteger("Enter exam ID: "));
-            } else if (choice == 3) {
-                showRecentAuditLogs(*connection);
-            } else {
-                std::cout << "Invalid option.\n";
-            }
+        if (choice == 1) {
+            thread reportThread(displayReport);
+            reportThread.join();
         }
-    } catch (const sql::SQLException& error) {
-        std::cerr << "MySQL error " << error.getErrorCode()
-                  << ": " << error.what() << '\n'
-                  << "Check MySQL service, credentials, Connector/C++, and schema.\n";
-        return 1;
-    }
+        else if (choice == 2) {
+            int id;
+            cout << "Enter Student ID: ";
+            cin >> id;
+
+            thread searchThread(searchStudent, id);
+            searchThread.join();
+        }
+        else if (choice == 3) {
+            int id, room, seat;
+
+            cout << "Student ID: ";
+            cin >> id;
+            cout << "New Room ID: ";
+            cin >> room;
+            cout << "New Seat Number: ";
+            cin >> seat;
+
+            thread allocationThread(
+                reallocateStudent, id, room, seat
+            );
+            allocationThread.join();
+        }
+
+    } while (choice != 0);
+
     return 0;
 }
