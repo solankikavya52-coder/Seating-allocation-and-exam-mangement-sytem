@@ -1,4 +1,5 @@
-SELECT
+--Student seating report
+    SELECT
     s.roll_no,
     s.full_name,
     e.exam_name,
@@ -13,6 +14,7 @@ JOIN EXAM e
 JOIN ROOM r
     ON a.room_id = r.room_id
 ORDER BY e.exam_date, r.room_name, a.seat_no;
+--Room-wise seating report
 SELECT
     e.exam_name,
     r.room_name,
