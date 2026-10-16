@@ -3,7 +3,6 @@
 #include <string>
 #include <thread>
 #include <mutex>
-#include <algorithm>
 using namespace std;
 mutex roomMutex;
 struct Allocation
