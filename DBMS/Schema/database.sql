@@ -36,6 +36,22 @@ CREATE TABLE IF NOT EXISTS ROOM (
     capacity INT NOT NULL CHECK (capacity > 0)
 );
 
+CREATE TABLE IF NOT EXISTS ALLOCATION (
+    allocation_id BIGINT AUTO_INCREMENT PRIMARY KEY,
+    student_id INT NOT NULL UNIQUE,
+    room_id INT NOT NULL,
+    seat_no INT NOT NULL,
+    allocated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT fk_allocation_student FOREIGN KEY (student_id)
+        REFERENCES STUDENT(student_id) ON DELETE CASCADE,
+    CONSTRAINT fk_allocation_room FOREIGN KEY (room_id)
+        REFERENCES ROOM(room_id) ON DELETE CASCADE,
+    CONSTRAINT uq_student_allocation UNIQUE (student_id),
+    CONSTRAINT uq_room_seat UNIQUE (room_id, seat_no),
+    INDEX idx_allocation_student (student_id),
+    INDEX idx_allocation_room (room_id)
+) ENGINE=InnoDB;
+
 CREATE INDEX idx_student_branch
 ON STUDENT(branch_id);
 
